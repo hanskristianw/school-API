@@ -14,23 +14,34 @@ import (
 var db *pgx.Conn
 
 func main() {
+	// ✅ Inisialisasi router chi
 	r := chi.NewRouter()
-	dsn := ""
 
+	// ✅ Tambahkan middleware CORS langsung ke router
+	r.Use(func(next http.Handler) http.Handler {
+		return withCORS(next)
+	})
+
+	// ✅ Koneksi ke database Neon
+	dsn := "postgresql://neondb_owner:npg_TRZkvJyO64hd@ep-divine-term-a1jftj2r-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 	var err error
 	db, err = pgx.Connect(context.Background(), dsn)
 	if err != nil {
 		log.Fatalf("❌ Gagal konek ke Neon: %v", err)
 	}
 	defer db.Close(context.Background())
-	r.Get("/menu/{role}", menuHandler)
 	log.Println("✅ Berhasil konek ke Neon DB")
 
-	// ✅ Bungkus handler dengan CORS
-	http.Handle("/login", withCORS(http.HandlerFunc(loginHandler)))
+	// ✅ Daftarkan endpoint API
+	r.Post("/login", loginHandler)
+	r.Get("/menu/{role}", menuHandler)
 
+	// ✅ Jalankan server
 	log.Println("🚀 Server jalan di http://localhost:8080")
-	http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", r)
+	if err != nil {
+		log.Fatalf("❌ Gagal menjalankan server: %v", err)
+	}
 }
 
 // ✅ CORS middleware
@@ -118,7 +129,7 @@ func menuHandler(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 	SELECT m.menu_name, m.menu_path, m.menu_icon
-	FROM menu m
+	FROM menus m
 	JOIN menu_roles mr ON m.menu_id = mr.menu_id
 	JOIN role r ON r.role_id = mr.role_id
 	WHERE r.role_name = $1
@@ -127,7 +138,8 @@ func menuHandler(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query(context.Background(), query, role)
 	if err != nil {
-		http.Error(w, "Query error", http.StatusInternalServerError)
+		log.Println("❌ Query error:", err)
+		respondWithError(w, http.StatusInternalServerError, "Query error")
 		return
 	}
 	defer rows.Close()
@@ -144,5 +156,6 @@ func menuHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(menus)
 }
