@@ -23,7 +23,7 @@ func main() {
 	})
 
 	// ✅ Koneksi ke database Neon
-	dsn := "postgresql://neondb_owner:npg_TRZkvJyO64hd@ep-divine-term-a1jftj2r-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+	dsn := ""
 	var err error
 	db, err = pgx.Connect(context.Background(), dsn)
 	if err != nil {
