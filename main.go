@@ -27,15 +27,17 @@ type Menu struct {
 }
 
 type User struct {
-	UserID           int    `json:"user_id"`
-	UserNamaDepan    string `json:"user_nama_depan"`
-	UserNamaBelakang string `json:"user_nama_belakang"`
-	UserUsername     string `json:"user_username"`
-	UserPassword     string `json:"user_password"`
-	UserRoleID       int    `json:"user_role_id"`
-	RoleName         string `json:"role_name"`
-	IsAdmin          bool   `json:"is_admin"`
-	IsActive         bool   `json:"is_active"`
+	UserID           int     `json:"user_id"`
+	UserNamaDepan    string  `json:"user_nama_depan"`
+	UserNamaBelakang string  `json:"user_nama_belakang"`
+	UserUsername     string  `json:"user_username"`
+	UserPassword     string  `json:"user_password"`
+	UserRoleID       int     `json:"user_role_id"`
+	UserUnitID       *int    `json:"user_unit_id"`
+	RoleName         string  `json:"role_name"`
+	UnitName         *string `json:"unit_name"`
+	IsAdmin          bool    `json:"is_admin"`
+	IsActive         bool    `json:"is_active"`
 }
 
 type MenuResponse struct {
@@ -72,6 +74,7 @@ type CreateUserRequest struct {
 	UserUsername     string `json:"user_username"`
 	UserPassword     string `json:"user_password"`
 	UserRoleID       int    `json:"user_role_id"`
+	UserUnitID       *int   `json:"user_unit_id"`
 }
 
 type UpdateUserRequest struct {
@@ -80,6 +83,7 @@ type UpdateUserRequest struct {
 	UserUsername     string `json:"user_username"`
 	UserPassword     string `json:"user_password,omitempty"` // Optional for updates
 	UserRoleID       int    `json:"user_role_id"`
+	UserUnitID       *int   `json:"user_unit_id"`
 	IsActive         bool   `json:"is_active"`
 }
 
@@ -252,9 +256,10 @@ func getAllUsers() ([]User, error) {
 	log.Println("🔍 Getting all users from Neon database...")
 	query := `
 		SELECT u.user_id, u.user_nama_depan, u.user_nama_belakang, u.user_username, 
-		       u.user_password, u.user_role_id, r.role_name, r.is_admin, u.is_active
+		       u.user_password, u.user_role_id, u.user_unit_id, r.role_name, r.is_admin, u.is_active, ut.unit_name
 		FROM users u
 		JOIN role r ON u.user_role_id = r.role_id
+		LEFT JOIN unit ut ON u.user_unit_id = ut.unit_id
 		ORDER BY u.user_id ASC
 	`
 
@@ -275,9 +280,11 @@ func getAllUsers() ([]User, error) {
 			&user.UserUsername,
 			&user.UserPassword,
 			&user.UserRoleID,
+			&user.UserUnitID,
 			&user.RoleName,
 			&user.IsAdmin,
 			&user.IsActive,
+			&user.UnitName,
 		)
 		if err != nil {
 			log.Printf("❌ Row scan error: %v", err)
@@ -302,15 +309,15 @@ func createUser(req CreateUserRequest) (*User, error) {
 	}
 
 	query := `
-		INSERT INTO users (user_nama_depan, user_nama_belakang, user_username, user_password, user_role_id, is_active)
-		VALUES ($1, $2, $3, $4, $5, true)
+		INSERT INTO users (user_nama_depan, user_nama_belakang, user_username, user_password, user_role_id, user_unit_id, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, true)
 		RETURNING user_id
 	`
 
 	var userID int
 	err = db.QueryRow(context.Background(), query,
 		req.UserNamaDepan, req.UserNamaBelakang, req.UserUsername,
-		string(hashedPassword), req.UserRoleID).Scan(&userID)
+		string(hashedPassword), req.UserRoleID, req.UserUnitID).Scan(&userID)
 
 	if err != nil {
 		log.Printf("❌ Error creating user: %v", err)
@@ -320,9 +327,10 @@ func createUser(req CreateUserRequest) (*User, error) {
 	// Get the created user with role information
 	getUserQuery := `
 		SELECT u.user_id, u.user_nama_depan, u.user_nama_belakang, u.user_username, 
-		       u.user_role_id, r.role_name, r.is_admin, u.is_active
+		       u.user_role_id, u.user_unit_id, r.role_name, r.is_admin, u.is_active, ut.unit_name
 		FROM users u
 		JOIN role r ON u.user_role_id = r.role_id
+		LEFT JOIN unit ut ON u.user_unit_id = ut.unit_id
 		WHERE u.user_id = $1
 	`
 
@@ -333,9 +341,11 @@ func createUser(req CreateUserRequest) (*User, error) {
 		&user.UserNamaBelakang,
 		&user.UserUsername,
 		&user.UserRoleID,
+		&user.UserUnitID,
 		&user.RoleName,
 		&user.IsAdmin,
 		&user.IsActive,
+		&user.UnitName,
 	)
 
 	if err != nil {
@@ -410,21 +420,21 @@ func updateUser(userID int, req UpdateUserRequest) (*User, error) {
 		query = `
 			UPDATE users 
 			SET user_nama_depan = $1, user_nama_belakang = $2, user_username = $3, 
-			    user_password = $4, user_role_id = $5, is_active = $6, updated_at = CURRENT_TIMESTAMP
-			WHERE user_id = $7
+			    user_password = $4, user_role_id = $5, user_unit_id = $6, is_active = $7, updated_at = CURRENT_TIMESTAMP
+			WHERE user_id = $8
 		`
 		args = []interface{}{req.UserNamaDepan, req.UserNamaBelakang, req.UserUsername,
-			string(hashedPassword), req.UserRoleID, req.IsActive, userID}
+			string(hashedPassword), req.UserRoleID, req.UserUnitID, req.IsActive, userID}
 	} else {
 		// Update without changing password
 		query = `
 			UPDATE users 
 			SET user_nama_depan = $1, user_nama_belakang = $2, user_username = $3, 
-			    user_role_id = $4, is_active = $5, updated_at = CURRENT_TIMESTAMP
-			WHERE user_id = $6
+			    user_role_id = $4, user_unit_id = $5, is_active = $6, updated_at = CURRENT_TIMESTAMP
+			WHERE user_id = $7
 		`
 		args = []interface{}{req.UserNamaDepan, req.UserNamaBelakang, req.UserUsername,
-			req.UserRoleID, req.IsActive, userID}
+			req.UserRoleID, req.UserUnitID, req.IsActive, userID}
 	}
 
 	_, err = db.Exec(context.Background(), query, args...)
@@ -436,9 +446,10 @@ func updateUser(userID int, req UpdateUserRequest) (*User, error) {
 	// Get the updated user with role information
 	getUserQuery := `
 		SELECT u.user_id, u.user_nama_depan, u.user_nama_belakang, u.user_username, 
-		       u.user_role_id, r.role_name, r.is_admin, u.is_active
+		       u.user_role_id, u.user_unit_id, r.role_name, r.is_admin, u.is_active, ut.unit_name
 		FROM users u
 		JOIN role r ON u.user_role_id = r.role_id
+		LEFT JOIN unit ut ON u.user_unit_id = ut.unit_id
 		WHERE u.user_id = $1
 	`
 
@@ -449,9 +460,11 @@ func updateUser(userID int, req UpdateUserRequest) (*User, error) {
 		&user.UserNamaBelakang,
 		&user.UserUsername,
 		&user.UserRoleID,
+		&user.UserUnitID,
 		&user.RoleName,
 		&user.IsAdmin,
 		&user.IsActive,
+		&user.UnitName,
 	)
 
 	if err != nil {
@@ -939,6 +952,59 @@ func initUnitTable(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func migrateAddUserUnitID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if column already exists
+	checkColumnQuery := `
+		SELECT EXISTS (
+			SELECT 1 
+			FROM information_schema.columns 
+			WHERE table_name = 'users' 
+			AND column_name = 'user_unit_id'
+		)
+	`
+	
+	var columnExists bool
+	err := db.QueryRow(context.Background(), checkColumnQuery).Scan(&columnExists)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error checking column existence: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if columnExists {
+		response := map[string]interface{}{
+			"status":  "success",
+			"message": "user_unit_id column already exists",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Add user_unit_id column to users table
+	addColumnQuery := `
+		ALTER TABLE users 
+		ADD COLUMN user_unit_id INTEGER REFERENCES unit(unit_id)
+	`
+
+	_, err = db.Exec(context.Background(), addColumnQuery)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error adding user_unit_id column: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "user_unit_id column added successfully",
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 func testHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1002,6 +1068,7 @@ func main() {
 	// Admin endpoints
 	r.Post("/admin/init-user-menu", initUserManagementMenu)
 	r.Post("/admin/init-unit-table", initUnitTable)
+	r.Post("/admin/migrate-user-unit-id", migrateAddUserUnitID)
 
 	// Get port from environment variable, default to 8080
 	port := os.Getenv("PORT")
