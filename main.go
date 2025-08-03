@@ -173,9 +173,37 @@ func initDB() error {
 
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+
+		// Allow common development and production origins
+		allowedOrigins := []string{
+			"http://localhost:3000", // Next.js development
+			"http://localhost:3001", // Alternative dev port
+			"https://vercel.app",    // Vercel deployments
+			"https://*.vercel.app",  // Vercel subdomains
+			"https://*.netlify.app", // Netlify deployments
+			"https://*.railway.app", // Railway deployments
+		}
+
+		// Check if origin is allowed or allow all in development
+		isAllowed := false
+		for _, allowed := range allowedOrigins {
+			if allowed == "*" || allowed == origin {
+				isAllowed = true
+				break
+			}
+		}
+
+		if isAllowed || origin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -1752,7 +1780,7 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🌐 Server starting on http://localhost:%s", port)
+	log.Printf("🌐 Server starting on port %s", port)
 	log.Printf("📍 Endpoints:")
 	log.Printf("   GET /test - Server status & Neon database info")
 	log.Printf("   POST /login - User login (authenticate against Neon)")
@@ -1771,6 +1799,10 @@ func main() {
 	log.Printf("   POST /classes - Create new class")
 	log.Printf("   PUT /classes/{id} - Update class by ID")
 	log.Printf("   DELETE /classes/{id} - Delete class by ID")
+	log.Printf("   GET /subjects - Get all subjects")
+	log.Printf("   POST /subjects - Create new subject")
+	log.Printf("   PUT /subjects/{id} - Update subject by ID")
+	log.Printf("   DELETE /subjects/{id} - Delete subject by ID")
 	log.Printf("   POST /admin/init-user-menu - Initialize user management menu")
 	log.Printf("   POST /admin/init-unit-table - Initialize unit table")
 
