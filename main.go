@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +70,28 @@ type Unit struct {
 	UnitName string `json:"unit_name"`
 }
 
+type Class struct {
+	KelasID          int    `json:"kelas_id"`
+	KelasNama        string `json:"kelas_nama"`
+	KelasUserID      int    `json:"kelas_user_id"`
+	KelasUnitID      int    `json:"kelas_unit_id"`
+	UserNamaDepan    string `json:"user_nama_depan"`
+	UserNamaBelakang string `json:"user_nama_belakang"`
+	UnitName         string `json:"unit_name"`
+}
+
+type CreateClassRequest struct {
+	KelasNama   string `json:"kelas_nama"`
+	KelasUserID int    `json:"kelas_user_id"`
+	KelasUnitID int    `json:"kelas_unit_id"`
+}
+
+type UpdateClassRequest struct {
+	KelasNama   string `json:"kelas_nama"`
+	KelasUserID int    `json:"kelas_user_id"`
+	KelasUnitID int    `json:"kelas_unit_id"`
+}
+
 type CreateUserRequest struct {
 	UserNamaDepan    string `json:"user_nama_depan"`
 	UserNamaBelakang string `json:"user_nama_belakang"`
@@ -85,6 +109,28 @@ type UpdateUserRequest struct {
 	UserRoleID       int    `json:"user_role_id"`
 	UserUnitID       *int   `json:"user_unit_id"`
 	IsActive         bool   `json:"is_active"`
+}
+
+type Subject struct {
+	SubjectID        int    `json:"subject_id"`
+	SubjectName      string `json:"subject_name"`
+	SubjectUserID    int    `json:"subject_user_id"`
+	SubjectUnitID    int    `json:"subject_unit_id"`
+	UserNamaDepan    string `json:"user_nama_depan"`
+	UserNamaBelakang string `json:"user_nama_belakang"`
+	UnitName         string `json:"unit_name"`
+}
+
+type CreateSubjectRequest struct {
+	SubjectName   string `json:"subject_name"`
+	SubjectUserID int    `json:"subject_user_id"`
+	SubjectUnitID int    `json:"subject_unit_id"`
+}
+
+type UpdateSubjectRequest struct {
+	SubjectName   string `json:"subject_name"`
+	SubjectUserID int    `json:"subject_user_id"`
+	SubjectUnitID int    `json:"subject_unit_id"`
 }
 
 func initDB() error {
@@ -865,6 +911,270 @@ func getAllUnits() ([]Unit, error) {
 	return units, nil
 }
 
+// Classes handlers
+func classesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case "GET":
+		handleGetClasses(w, r)
+	case "POST":
+		handleCreateClass(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func classByIDHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	classIDStr := chi.URLParam(r, "id")
+
+	classID := 0
+	if _, err := fmt.Sscanf(classIDStr, "%d", &classID); err != nil {
+		http.Error(w, "Invalid class ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		handleGetClassByID(w, r, classID)
+	case "PUT":
+		handleUpdateClass(w, r, classID)
+	case "DELETE":
+		handleDeleteClass(w, r, classID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetClasses(w http.ResponseWriter, _ *http.Request) {
+	classes, err := getAllClasses()
+	if err != nil {
+		log.Printf("Error getting classes: %v", err)
+		http.Error(w, "Error getting classes", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"classes": classes,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleCreateClass(w http.ResponseWriter, r *http.Request) {
+	var req CreateClassRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.KelasNama == "" || req.KelasUserID == 0 || req.KelasUnitID == 0 {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+
+	class, err := createClass(req)
+	if err != nil {
+		log.Printf("Error creating class: %v", err)
+		if strings.Contains(err.Error(), "duplicate key") {
+			http.Error(w, "Class name already exists", http.StatusConflict)
+		} else if strings.Contains(err.Error(), "foreign key") {
+			http.Error(w, "Invalid user or unit reference", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Error creating class", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   class,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleGetClassByID(w http.ResponseWriter, _ *http.Request, classID int) {
+	class, err := getClassByID(classID)
+	if err != nil {
+		log.Printf("Error getting class by ID: %v", err)
+		http.Error(w, "Class not found", http.StatusNotFound)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   class,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleUpdateClass(w http.ResponseWriter, r *http.Request, classID int) {
+	var req UpdateClassRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.KelasNama == "" || req.KelasUserID == 0 || req.KelasUnitID == 0 {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+
+	class, err := updateClass(classID, req)
+	if err != nil {
+		log.Printf("Error updating class: %v", err)
+		if strings.Contains(err.Error(), "duplicate key") {
+			http.Error(w, "Class name already exists", http.StatusConflict)
+		} else if strings.Contains(err.Error(), "foreign key") {
+			http.Error(w, "Invalid user or unit reference", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Error updating class", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   class,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleDeleteClass(w http.ResponseWriter, _ *http.Request, classID int) {
+	err := deleteClass(classID)
+	if err != nil {
+		log.Printf("Error deleting class: %v", err)
+		http.Error(w, "Error deleting class", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Class deleted successfully",
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+// Class database functions
+func getAllClasses() ([]Class, error) {
+	query := `
+		SELECT 
+			k.kelas_id, 
+			k.kelas_nama, 
+			k.kelas_user_id, 
+			k.kelas_unit_id,
+			u.user_nama_depan,
+			u.user_nama_belakang,
+			un.unit_name
+		FROM kelas k
+		JOIN users u ON k.kelas_user_id = u.user_id
+		JOIN unit un ON k.kelas_unit_id = un.unit_id
+		ORDER BY k.kelas_id ASC
+	`
+
+	rows, err := db.Query(context.Background(), query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var classes []Class
+	for rows.Next() {
+		var class Class
+		err := rows.Scan(
+			&class.KelasID,
+			&class.KelasNama,
+			&class.KelasUserID,
+			&class.KelasUnitID,
+			&class.UserNamaDepan,
+			&class.UserNamaBelakang,
+			&class.UnitName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		classes = append(classes, class)
+	}
+
+	return classes, nil
+}
+
+func createClass(req CreateClassRequest) (*Class, error) {
+	query := `
+		INSERT INTO kelas (kelas_nama, kelas_user_id, kelas_unit_id) 
+		VALUES ($1, $2, $3) 
+		RETURNING kelas_id
+	`
+
+	var kelasID int
+	err := db.QueryRow(context.Background(), query, req.KelasNama, req.KelasUserID, req.KelasUnitID).Scan(&kelasID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the created class with joined data
+	return getClassByID(kelasID)
+}
+
+func getClassByID(id int) (*Class, error) {
+	query := `
+		SELECT 
+			k.kelas_id, 
+			k.kelas_nama, 
+			k.kelas_user_id, 
+			k.kelas_unit_id,
+			u.user_nama_depan,
+			u.user_nama_belakang,
+			un.unit_name
+		FROM kelas k
+		JOIN users u ON k.kelas_user_id = u.user_id
+		JOIN unit un ON k.kelas_unit_id = un.unit_id
+		WHERE k.kelas_id = $1
+	`
+
+	var class Class
+	err := db.QueryRow(context.Background(), query, id).Scan(
+		&class.KelasID,
+		&class.KelasNama,
+		&class.KelasUserID,
+		&class.KelasUnitID,
+		&class.UserNamaDepan,
+		&class.UserNamaBelakang,
+		&class.UnitName,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &class, nil
+}
+
+func updateClass(id int, req UpdateClassRequest) (*Class, error) {
+	query := `
+		UPDATE kelas 
+		SET kelas_nama = $1, kelas_user_id = $2, kelas_unit_id = $3
+		WHERE kelas_id = $4
+	`
+
+	_, err := db.Exec(context.Background(), query, req.KelasNama, req.KelasUserID, req.KelasUnitID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the updated class with joined data
+	return getClassByID(id)
+}
+
+func deleteClass(id int) error {
+	query := `DELETE FROM kelas WHERE kelas_id = $1`
+	_, err := db.Exec(context.Background(), query, id)
+	return err
+}
+
 func initUserManagementMenu(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -952,6 +1262,62 @@ func initUnitTable(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func initClassManagementMenu(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if Class Management menu already exists
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM menus WHERE menu_name = 'Class Management' AND menu_path = '/data/class')`
+	err := db.QueryRow(context.Background(), checkQuery).Scan(&exists)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error checking menu existence: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		response := map[string]interface{}{
+			"status":  "success",
+			"message": "Class Management menu already exists",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Insert the Class Management menu under Data Management (parent_id = 57)
+	insertMenuQuery := `
+		INSERT INTO menus (menu_name, menu_path, menu_icon, menu_order, menu_parent_id) 
+		VALUES ('Class Management', '/data/class', 'graduation-cap', 4, 57)
+		RETURNING menu_id
+	`
+
+	var menuID int
+	err = db.QueryRow(context.Background(), insertMenuQuery).Scan(&menuID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error inserting menu: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Grant permission to admin role (role_id = 1) for this new menu
+	insertPermissionQuery := `INSERT INTO menu_permissions (menu_id, role_id) VALUES ($1, 1)`
+	_, err = db.Exec(context.Background(), insertPermissionQuery, menuID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error inserting menu permission: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Class Management menu created successfully",
+		"menu_id": menuID,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 func migrateAddUserUnitID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -969,7 +1335,7 @@ func migrateAddUserUnitID(w http.ResponseWriter, r *http.Request) {
 			AND column_name = 'user_unit_id'
 		)
 	`
-	
+
 	var columnExists bool
 	err := db.QueryRow(context.Background(), checkColumnQuery).Scan(&columnExists)
 	if err != nil {
@@ -1032,6 +1398,299 @@ func testHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// Subject CRUD functions
+func getAllSubjects() ([]Subject, error) {
+	query := `
+		SELECT 
+			s.subject_id, 
+			s.subject_name, 
+			s.subject_user_id, 
+			s.subject_unit_id,
+			COALESCE(u.user_nama_depan, '') as user_nama_depan,
+			COALESCE(u.user_nama_belakang, '') as user_nama_belakang,
+			COALESCE(unit.unit_name, '') as unit_name
+		FROM subject s
+		LEFT JOIN users u ON s.subject_user_id = u.user_id
+		LEFT JOIN unit unit ON s.subject_unit_id = unit.unit_id
+		ORDER BY s.subject_id ASC
+	`
+
+	rows, err := db.Query(context.Background(), query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var subjects []Subject
+	for rows.Next() {
+		var subject Subject
+		err := rows.Scan(
+			&subject.SubjectID,
+			&subject.SubjectName,
+			&subject.SubjectUserID,
+			&subject.SubjectUnitID,
+			&subject.UserNamaDepan,
+			&subject.UserNamaBelakang,
+			&subject.UnitName,
+		)
+		if err != nil {
+			return nil, err
+		}
+		subjects = append(subjects, subject)
+	}
+
+	return subjects, nil
+}
+
+func createSubject(req CreateSubjectRequest) error {
+	query := `
+		INSERT INTO subject (subject_name, subject_user_id, subject_unit_id)
+		VALUES ($1, $2, $3)
+	`
+
+	_, err := db.Exec(context.Background(), query, req.SubjectName, req.SubjectUserID, req.SubjectUnitID)
+	return err
+}
+
+func getSubjectByID(id int) (*Subject, error) {
+	query := `
+		SELECT 
+			s.subject_id, 
+			s.subject_name, 
+			s.subject_user_id, 
+			s.subject_unit_id,
+			COALESCE(u.user_nama_depan, '') as user_nama_depan,
+			COALESCE(u.user_nama_belakang, '') as user_nama_belakang,
+			COALESCE(unit.unit_name, '') as unit_name
+		FROM subject s
+		LEFT JOIN users u ON s.subject_user_id = u.user_id
+		LEFT JOIN unit unit ON s.subject_unit_id = unit.unit_id
+		WHERE s.subject_id = $1
+	`
+
+	var subject Subject
+	err := db.QueryRow(context.Background(), query, id).Scan(
+		&subject.SubjectID,
+		&subject.SubjectName,
+		&subject.SubjectUserID,
+		&subject.SubjectUnitID,
+		&subject.UserNamaDepan,
+		&subject.UserNamaBelakang,
+		&subject.UnitName,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &subject, nil
+}
+
+func updateSubject(id int, req UpdateSubjectRequest) error {
+	query := `
+		UPDATE subject 
+		SET subject_name = $2, subject_user_id = $3, subject_unit_id = $4
+		WHERE subject_id = $1
+	`
+
+	result, err := db.Exec(context.Background(), query, id, req.SubjectName, req.SubjectUserID, req.SubjectUnitID)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("subject with ID %d not found", id)
+	}
+
+	return nil
+}
+
+func deleteSubject(id int) error {
+	query := `DELETE FROM subject WHERE subject_id = $1`
+
+	result, err := db.Exec(context.Background(), query, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("subject with ID %d not found", id)
+	}
+
+	return nil
+}
+
+// Subject HTTP handlers
+func subjectsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleGetSubjects(w, r)
+	case http.MethodPost:
+		handleCreateSubject(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetSubjects(w http.ResponseWriter, _ *http.Request) {
+	subjects, err := getAllSubjects()
+	if err != nil {
+		log.Printf("Error fetching subjects: %v", err)
+		http.Error(w, "Failed to fetch subjects", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":   "success",
+		"subjects": subjects,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleCreateSubject(w http.ResponseWriter, r *http.Request) {
+	var req CreateSubjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.SubjectName == "" || req.SubjectUserID == 0 || req.SubjectUnitID == 0 {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := createSubject(req); err != nil {
+		log.Printf("Error creating subject: %v", err)
+		if strings.Contains(err.Error(), "duplicate key") {
+			http.Error(w, "Subject name already exists", http.StatusConflict)
+		} else if strings.Contains(err.Error(), "foreign key") {
+			http.Error(w, "Invalid teacher or unit ID", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Failed to create subject", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Subject created successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
+
+func subjectByIDHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleGetSubjectByID(w, r)
+	case http.MethodPut:
+		handleUpdateSubject(w, r)
+	case http.MethodDelete:
+		handleDeleteSubject(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetSubjectByID(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid subject ID", http.StatusBadRequest)
+		return
+	}
+
+	subject, err := getSubjectByID(id)
+	if err != nil {
+		log.Printf("Error fetching subject by ID: %v", err)
+		http.Error(w, "Subject not found", http.StatusNotFound)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"subject": subject,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleUpdateSubject(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid subject ID", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateSubjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.SubjectName == "" || req.SubjectUserID == 0 || req.SubjectUnitID == 0 {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := updateSubject(id, req); err != nil {
+		log.Printf("Error updating subject: %v", err)
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "Subject not found", http.StatusNotFound)
+		} else if strings.Contains(err.Error(), "duplicate key") {
+			http.Error(w, "Subject name already exists", http.StatusConflict)
+		} else if strings.Contains(err.Error(), "foreign key") {
+			http.Error(w, "Invalid teacher or unit ID", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Failed to update subject", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Subject updated successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid subject ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := deleteSubject(id); err != nil {
+		log.Printf("Error deleting subject: %v", err)
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "Subject not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to delete subject", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Subject deleted successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	log.Println("🚀 Starting School Admin API Server with Neon Database...")
 	if err := initDB(); err != nil {
@@ -1065,9 +1724,26 @@ func main() {
 		r.Delete("/{id}", unitByIDHandler)
 	})
 
+	// Classes CRUD endpoints
+	r.Route("/classes", func(r chi.Router) {
+		r.Get("/", classesHandler)
+		r.Post("/", classesHandler)
+		r.Put("/{id}", classByIDHandler)
+		r.Delete("/{id}", classByIDHandler)
+	})
+
+	// Subjects CRUD endpoints
+	r.Route("/subjects", func(r chi.Router) {
+		r.Get("/", subjectsHandler)
+		r.Post("/", subjectsHandler)
+		r.Put("/{id}", subjectByIDHandler)
+		r.Delete("/{id}", subjectByIDHandler)
+	})
+
 	// Admin endpoints
 	r.Post("/admin/init-user-menu", initUserManagementMenu)
 	r.Post("/admin/init-unit-table", initUnitTable)
+	r.Post("/admin/init-class-menu", initClassManagementMenu)
 	r.Post("/admin/migrate-user-unit-id", migrateAddUserUnitID)
 
 	// Get port from environment variable, default to 8080
@@ -1091,6 +1767,10 @@ func main() {
 	log.Printf("   POST /units - Create new unit")
 	log.Printf("   PUT /units/{id} - Update unit by ID")
 	log.Printf("   DELETE /units/{id} - Delete unit by ID")
+	log.Printf("   GET /classes - Get all classes")
+	log.Printf("   POST /classes - Create new class")
+	log.Printf("   PUT /classes/{id} - Update class by ID")
+	log.Printf("   DELETE /classes/{id} - Delete class by ID")
 	log.Printf("   POST /admin/init-user-menu - Initialize user management menu")
 	log.Printf("   POST /admin/init-unit-table - Initialize unit table")
 
